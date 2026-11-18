@@ -201,7 +201,7 @@ fun App(
                 NavigationBarItem(
                     selected = tab == 2,
                     onClick = { tab = 2 },
-                    icon = { Icon(SettingsIcon, contentDescription = null) },
+                    icon = { Icon(Icons.Default.SettingsIcon, contentDescription = null) },
                     label = { Text("Settings") },
                 )
             }
