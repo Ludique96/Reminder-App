@@ -14,7 +14,7 @@ android {
         targetSdk = 35
         // CI sets GITHUB_RUN_NUMBER so every build has a higher version than the last.
         versionCode = System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull() ?: 1
-        versionName = "1.0"
+        versionName = "1.1"
     }
 
     // A fixed key means every build is signed the same way, so a new APK installs
@@ -54,5 +54,6 @@ dependencies {
     implementation(platform("androidx.compose:compose-bom:2024.10.01"))
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.material3:material3")
+    implementation("androidx.compose.material:material-icons-core")
     implementation("com.google.android.gms:play-services-location:21.3.0")
 }

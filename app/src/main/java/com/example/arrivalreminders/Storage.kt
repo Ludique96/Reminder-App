@@ -69,11 +69,13 @@ object Storage {
         .put("text", i.text)
         .put("placeId", i.placeId ?: JSONObject.NULL)
         .put("done", i.done)
+        .put("repeat", i.repeat)
 
     private fun itemFromJson(o: JSONObject): TodoItem = TodoItem(
         id = o.getString("id"),
         text = o.getString("text"),
         placeId = if (o.isNull("placeId")) null else o.getString("placeId"),
         done = o.optBoolean("done", false),
+        repeat = o.optBoolean("repeat", false),
     )
 }

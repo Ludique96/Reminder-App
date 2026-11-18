@@ -12,8 +12,13 @@ import androidx.core.app.NotificationManagerCompat
 object Notifier {
     private const val CHANNEL_ID = "arrivals"
 
+    const val ACTION_DONE = "com.example.arrivalreminders.ACTION_DONE"
+    const val EXTRA_PLACE_ID = "place_id"
+
     // Wi-Fi can flap and geofences can fire repeatedly near the edge; don't spam.
     private const val COOLDOWN_MS = 10 * 60 * 1000L
+
+    private const val MAX_LINES = 6
 
     fun ensureChannel(ctx: Context) {
         val nm = ctx.getSystemService(NotificationManager::class.java)
@@ -25,14 +30,24 @@ object Notifier {
     /** Called when the phone arrives at a place. Posts a notification listing that place's open items. */
     @SuppressLint("MissingPermission")
     fun arrive(ctx: Context, placeId: String) {
-        val data = Storage.load(ctx)
+        var data = Storage.load(ctx)
         val place = data.places.firstOrNull { it.id == placeId } ?: return
-        val items = data.items.filter { it.placeId == placeId && !it.done }
-        if (items.isEmpty()) return
 
         val prefs = ctx.getSharedPreferences("cooldown", Context.MODE_PRIVATE)
         val now = System.currentTimeMillis()
         if (now - prefs.getLong(placeId, 0L) < COOLDOWN_MS) return
+
+        // Repeating items that were ticked off on a previous visit come back fresh.
+        val refreshed = data.items.map {
+            if (it.placeId == placeId && it.repeat && it.done) it.copy(done = false) else it
+        }
+        if (refreshed != data.items) {
+            data = data.copy(items = refreshed)
+            Storage.save(ctx, data)
+        }
+
+        val items = data.items.filter { it.placeId == placeId && !it.done }
+        if (items.isEmpty()) return
 
         if (!NotificationManagerCompat.from(ctx).areNotificationsEnabled()) return
         ensureChannel(ctx)
@@ -43,15 +58,27 @@ object Notifier {
             Intent(ctx, MainActivity::class.java),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
+        val doneIntent = Intent(ctx, NotificationActionReceiver::class.java)
+            .setAction(ACTION_DONE)
+            .putExtra(EXTRA_PLACE_ID, placeId)
+        val donePending = PendingIntent.getBroadcast(
+            ctx,
+            placeId.hashCode(),
+            doneIntent,
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+        )
+
         val style = NotificationCompat.InboxStyle()
-        items.take(6).forEach { style.addLine(it.text) }
+        items.take(MAX_LINES).forEach { style.addLine(it.text) }
+        if (items.size > MAX_LINES) style.setSummaryText("+${items.size - MAX_LINES} more")
 
         val notification = NotificationCompat.Builder(ctx, CHANNEL_ID)
-            .setSmallIcon(android.R.drawable.ic_dialog_info)
+            .setSmallIcon(R.drawable.ic_stat_pin)
             .setContentTitle("You're at ${place.name}")
             .setContentText(if (items.size == 1) items[0].text else "${items.size} things to do here")
             .setStyle(style)
             .setContentIntent(open)
+            .addAction(0, if (items.size == 1) "Done" else "Mark all done", donePending)
             .setAutoCancel(true)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .build()

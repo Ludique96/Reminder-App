@@ -15,10 +15,16 @@ data class Place(
     val radiusMeters: Float = 150f,
 )
 
-/** A to-do item. If placeId is set, it is shown in a notification when you arrive at that place. */
+/**
+ * A to-do item. If placeId is set, it is shown in a notification when you arrive at that place.
+ *
+ * repeat = false: reminds you on every arrival until you tick it off.
+ * repeat = true: ticking it off only covers this visit; it comes back on your next arrival.
+ */
 data class TodoItem(
     val id: String = UUID.randomUUID().toString(),
     val text: String,
     val placeId: String? = null,
     val done: Boolean = false,
+    val repeat: Boolean = false,
 )

@@ -3,6 +3,7 @@ package com.example.arrivalreminders
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import androidx.core.app.NotificationManagerCompat
 import com.google.android.gms.location.Geofence
 import com.google.android.gms.location.GeofencingEvent
 
@@ -33,6 +34,20 @@ class WifiReceiver : BroadcastReceiver() {
                 pending.finish()
             }
         }.start()
+    }
+}
+
+/** The "Done" button on an arrival notification: ticks off that place's open items. */
+class NotificationActionReceiver : BroadcastReceiver() {
+    override fun onReceive(context: Context, intent: Intent) {
+        if (intent.action != Notifier.ACTION_DONE) return
+        val placeId = intent.getStringExtra(Notifier.EXTRA_PLACE_ID) ?: return
+        val data = Storage.load(context)
+        val updated = data.items.map {
+            if (it.placeId == placeId && !it.done) it.copy(done = true) else it
+        }
+        Storage.save(context, data.copy(items = updated))
+        NotificationManagerCompat.from(context).cancel(placeId.hashCode())
     }
 }
 
