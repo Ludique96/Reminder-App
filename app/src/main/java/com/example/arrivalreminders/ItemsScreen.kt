@@ -1,6 +1,7 @@
 package com.example.arrivalreminders
 
 import android.content.Context
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -17,17 +18,22 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
+import androidx.compose.material3.SwipeToDismissBox
+import androidx.compose.material3.SwipeToDismissBoxValue
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -36,6 +42,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.platform.LocalContext
@@ -92,6 +100,9 @@ fun ItemsScreen(
                             )
                         },
                         onClick = { onEdit(todo) },
+                        onDelete = {
+                            onChange(data.copy(items = data.items.filter { it.id != todo.id }))
+                        },
                     )
                 }
             }
@@ -131,10 +142,63 @@ private fun GroupHeader(place: Place?, list: List<TodoItem>) {
     }
 }
 
+/** Swipe left to delete: a bin fades in and the row turns gradually red as you drag. */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun ItemRow(item: TodoItem, onToggle: (Boolean) -> Unit, onClick: () -> Unit) {
+private fun ItemRow(
+    item: TodoItem,
+    onToggle: (Boolean) -> Unit,
+    onClick: () -> Unit,
+    onDelete: () -> Unit,
+) {
+    val state = rememberSwipeToDismissBoxState(
+        confirmValueChange = { it == SwipeToDismissBoxValue.EndToStart },
+    )
+    LaunchedEffect(state.currentValue) {
+        if (state.currentValue == SwipeToDismissBoxValue.EndToStart) onDelete()
+    }
+
+    // Fully red by about the point where the swipe commits.
+    val amount = if (state.dismissDirection == SwipeToDismissBoxValue.EndToStart) {
+        (state.progress / 0.5f).coerceIn(0f, 1f)
+    } else {
+        0f
+    }
+    val rowColor = lerp(MaterialTheme.colorScheme.background, MaterialTheme.colorScheme.error, amount)
+
+    SwipeToDismissBox(
+        state = state,
+        enableDismissFromStartToEnd = false,
+        backgroundContent = {
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .background(rowColor)
+                    .padding(end = 24.dp),
+                contentAlignment = Alignment.CenterEnd,
+            ) {
+                Icon(
+                    Icons.Default.Delete,
+                    contentDescription = "Delete",
+                    tint = MaterialTheme.colorScheme.onError,
+                    modifier = Modifier.alpha(amount),
+                )
+            }
+        },
+    ) {
+        ItemRowContent(item, onToggle, onClick, Modifier.background(rowColor))
+    }
+}
+
+@Composable
+private fun ItemRowContent(
+    item: TodoItem,
+    onToggle: (Boolean) -> Unit,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
     Row(
-        Modifier
+        modifier
             .fillMaxWidth()
             .clickable(onClick = onClick)
             .padding(vertical = 2.dp),
@@ -182,10 +246,12 @@ fun ItemDialog(
     val lastPlace = prefs.getString("last_place", null)
 
     var text by remember { mutableStateOf(initial?.text ?: "") }
+    // A reminder always needs a place, so default to the current one, the last used, or the first.
     var placeId by remember {
         mutableStateOf(
-            if (initial != null) initial.placeId
-            else lastPlace?.takeIf { id -> data.places.any { it.id == id } }
+            initial?.placeId?.takeIf { id -> data.places.any { it.id == id } }
+                ?: lastPlace?.takeIf { id -> data.places.any { it.id == id } }
+                ?: data.places.firstOrNull()?.id
         )
     }
     var repeat by remember { mutableStateOf(initial?.repeat ?: false) }
@@ -210,11 +276,6 @@ fun ItemDialog(
                     Modifier.horizontalScroll(rememberScrollState()),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    FilterChip(
-                        selected = placeId == null,
-                        onClick = { placeId = null },
-                        label = { Text("Nowhere") },
-                    )
                     data.places.forEach { p ->
                         FilterChip(
                             selected = placeId == p.id,
@@ -253,7 +314,7 @@ fun ItemDialog(
         },
         confirmButton = {
             TextButton(
-                enabled = text.isNotBlank(),
+                enabled = text.isNotBlank() && placeId != null,
                 onClick = {
                     prefs.edit().putString("last_place", placeId).apply()
                     onSave(

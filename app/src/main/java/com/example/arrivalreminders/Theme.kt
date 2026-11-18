@@ -43,11 +43,18 @@ private val DarkColors = darkColorScheme(
     outline = Color(0xFF89938F),
 )
 
-/** Follows the phone's light/dark setting. */
 @Composable
-fun AppTheme(content: @Composable () -> Unit) {
+fun ThemeMode.isDark(): Boolean = when (this) {
+    ThemeMode.SYSTEM -> isSystemInDarkTheme()
+    ThemeMode.LIGHT -> false
+    ThemeMode.DARK -> true
+}
+
+/** Light, dark, or following the phone's setting, as chosen in Settings. */
+@Composable
+fun AppTheme(themeMode: ThemeMode = ThemeMode.SYSTEM, content: @Composable () -> Unit) {
     MaterialTheme(
-        colorScheme = if (isSystemInDarkTheme()) DarkColors else LightColors,
+        colorScheme = if (themeMode.isDark()) DarkColors else LightColors,
         content = content,
     )
 }

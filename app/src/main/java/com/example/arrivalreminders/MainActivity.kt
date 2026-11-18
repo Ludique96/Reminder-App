@@ -8,9 +8,11 @@ import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import androidx.activity.ComponentActivity
+import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -21,6 +23,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.LocationOn
+import androidx.compose.material.icons.filled.Settings as SettingsIcon
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -34,18 +37,21 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 
 class MainActivity : ComponentActivity() {
     // Bumped whenever permissions may have changed so the UI re-checks them.
     private var tick by mutableIntStateOf(0)
+    private var themeMode by mutableStateOf(ThemeMode.SYSTEM)
 
     private val backgroundLauncher =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) {
@@ -69,10 +75,36 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
         Notifier.ensureChannel(this)
+        themeMode = AppSettings.themeMode(this)
         setContent {
-            AppTheme {
+            // Keep status/navigation bar icons readable when the app theme differs from the phone's.
+            val dark = themeMode.isDark()
+            DisposableEffect(dark) {
+                enableEdgeToEdge(
+                    statusBarStyle = SystemBarStyle.auto(
+                        android.graphics.Color.TRANSPARENT,
+                        android.graphics.Color.TRANSPARENT,
+                        detectDarkMode = { dark },
+                    ),
+                    navigationBarStyle = SystemBarStyle.auto(
+                        android.graphics.Color.TRANSPARENT,
+                        android.graphics.Color.TRANSPARENT,
+                        detectDarkMode = { dark },
+                    ),
+                )
+                onDispose {}
+            }
+            AppTheme(themeMode) {
                 Surface(color = MaterialTheme.colorScheme.background) {
-                    App(tick = tick, onRequestPermissions = { requestPermissions() })
+                    App(
+                        tick = tick,
+                        themeMode = themeMode,
+                        onThemeChange = {
+                            themeMode = it
+                            AppSettings.setThemeMode(this@MainActivity, it)
+                        },
+                        onRequestPermissions = { requestPermissions() },
+                    )
                 }
             }
         }
@@ -103,8 +135,33 @@ fun openAppSettings(ctx: Context) {
     ctx.startActivity(intent)
 }
 
+private const val TAB_COUNT = 3
+
+/**
+ * Swipe left/right on empty space to change tab. Items handle their own horizontal swipes
+ * (swipe-to-delete) first, so this only fires where nothing else claims the drag.
+ */
+private fun Modifier.swipeToSwitchTabs(onSwipe: (direction: Int) -> Unit): Modifier =
+    pointerInput(Unit) {
+        val threshold = 72.dp.toPx()
+        var total = 0f
+        detectHorizontalDragGestures(
+            onDragStart = { total = 0f },
+            onDragEnd = {
+                if (total <= -threshold) onSwipe(1) else if (total >= threshold) onSwipe(-1)
+            },
+            onDragCancel = { total = 0f },
+            onHorizontalDrag = { _, dragAmount -> total += dragAmount },
+        )
+    }
+
 @Composable
-fun App(tick: Int, onRequestPermissions: () -> Unit) {
+fun App(
+    tick: Int,
+    themeMode: ThemeMode,
+    onThemeChange: (ThemeMode) -> Unit,
+    onRequestPermissions: () -> Unit,
+) {
     val ctx = LocalContext.current
     // Reloaded whenever the app resumes so changes made from a notification show up.
     var data by remember(tick) { mutableStateOf(Storage.load(ctx)) }
@@ -141,22 +198,30 @@ fun App(tick: Int, onRequestPermissions: () -> Unit) {
                     icon = { Icon(Icons.Default.LocationOn, contentDescription = null) },
                     label = { Text("Places") },
                 )
+                NavigationBarItem(
+                    selected = tab == 2,
+                    onClick = { tab = 2 },
+                    icon = { Icon(SettingsIcon, contentDescription = null) },
+                    label = { Text("Settings") },
+                )
             }
         },
         floatingActionButton = {
-            ExtendedFloatingActionButton(
-                onClick = {
-                    if (tab == 0) {
-                        editItem = null
-                        showItemDialog = true
-                    } else {
-                        editPlace = null
-                        showPlaceDialog = true
-                    }
-                },
-                icon = { Icon(Icons.Default.Add, contentDescription = null) },
-                text = { Text(if (tab == 0) "Add item" else "Add place") },
-            )
+            if (tab != 2) {
+                ExtendedFloatingActionButton(
+                    onClick = {
+                        if (tab == 0) {
+                            editItem = null
+                            showItemDialog = true
+                        } else {
+                            editPlace = null
+                            showPlaceDialog = true
+                        }
+                    },
+                    icon = { Icon(Icons.Default.Add, contentDescription = null) },
+                    text = { Text(if (tab == 0) "Add item" else "Add place") },
+                )
+            }
         },
     ) { padding ->
         Column(
@@ -172,7 +237,13 @@ fun App(tick: Int, onRequestPermissions: () -> Unit) {
                     onRequest = onRequestPermissions,
                 )
             }
-            Box(Modifier.weight(1f)) {
+            Box(
+                Modifier
+                    .weight(1f)
+                    .swipeToSwitchTabs { direction ->
+                        tab = (tab + direction).coerceIn(0, TAB_COUNT - 1)
+                    }
+            ) {
                 when (tab) {
                     0 -> ItemsScreen(
                         data = data,
@@ -182,12 +253,16 @@ fun App(tick: Int, onRequestPermissions: () -> Unit) {
                             showItemDialog = true
                         },
                     )
-                    else -> PlacesScreen(
+                    1 -> PlacesScreen(
                         data = data,
                         onEdit = { place ->
                             editPlace = place
                             showPlaceDialog = true
                         },
+                    )
+                    else -> SettingsScreen(
+                        themeMode = themeMode,
+                        onThemeChange = onThemeChange,
                     )
                 }
             }

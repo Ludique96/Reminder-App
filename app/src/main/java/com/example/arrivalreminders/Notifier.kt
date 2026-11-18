@@ -15,9 +15,6 @@ object Notifier {
     const val ACTION_DONE = "com.example.arrivalreminders.ACTION_DONE"
     const val EXTRA_PLACE_ID = "place_id"
 
-    // Wi-Fi can flap and geofences can fire repeatedly near the edge; don't spam.
-    private const val COOLDOWN_MS = 10 * 60 * 1000L
-
     private const val MAX_LINES = 6
 
     fun ensureChannel(ctx: Context) {
@@ -35,7 +32,9 @@ object Notifier {
 
         val prefs = ctx.getSharedPreferences("cooldown", Context.MODE_PRIVATE)
         val now = System.currentTimeMillis()
-        if (now - prefs.getLong(placeId, 0L) < COOLDOWN_MS) return
+        // Wi-Fi can flap and geofences can fire repeatedly near the edge; the user picks how long to wait.
+        val cooldownMs = AppSettings.cooldownMinutes(ctx) * 60_000L
+        if (now - prefs.getLong(placeId, 0L) < cooldownMs) return
 
         // Repeating items that were ticked off on a previous visit come back fresh.
         val refreshed = data.items.map {
